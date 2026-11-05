@@ -10,8 +10,11 @@ All notable changes to this project will be documented in this file.
 - MemoryFS uses mutex for thread-safe concurrent operations
 - MemoryFS returns data copies to prevent slice aliasing
 - LocalFS prevents escape through symlinks via `filepath.EvalSymlinks`
-- TOCTOU-safe file operations using `os.OpenFile` with `O_NOFOLLOW` on supported platforms
+- Platform-specific TOCTOU-safe file operations:
+  - Unix-like platforms (Linux, macOS, BSD, etc.): `O_NOFOLLOW` used for Read/Write/Delete
+  - Other platforms (Windows, JS, AIX, Android): fallback without `O_NOFOLLOW`, no full TOCTOU guarantee
 - Comprehensive tests for symlink escape, concurrent access, slice copying, Open behavior, and concurrent symlink substitution
+- Build tags for platform-specific symlink handling
 
 ### Fixed
 
@@ -20,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - LocalFS validates final resolved path after symlink evaluation
 - LocalFS Write/Delete through escaping symlinks are blocked
 - Component-level symlink check prevents directory traversal through internal symlinks
+- Path validation and O_NOFOLLOW only used on platforms that support them
 
 ### Changed
 

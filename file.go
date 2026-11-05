@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 )
 
 // Filesystem defines minimal operations.
@@ -21,10 +20,10 @@ type Filesystem interface {
 
 // localFS implements Filesystem using local disk.
 //
-// Symlink safety: Uses os.OpenFile with O_NOFOLLOW for Read/Write/Delete
-// to prevent TOCTOU symlink substitution attacks. The resolveChecked method
-// validates paths before operations, and O_NOFOLLOW ensures symlinks cannot
-// be used to escape the root directory during file operations.
+// Symlink safety: On Unix-like platforms, uses os.OpenFile with O_NOFOLLOW for Read/Write/Delete
+// to prevent TOCTOU symlink substitution attacks where possible. On platforms without O_NOFOLLOW
+// support, TOCTOU protection is not guaranteed. The resolveChecked method validates paths and
+// checks symlinks in the path chain to prevent directory traversal through symlinks.
 type localFS struct {
 	root string
 }
@@ -173,8 +172,8 @@ func (fs *localFS) Open(name string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Open file without following symlinks (TOCTOU-safe)
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	// Open file without following symlinks (TOCTOU-safe on supported platforms)
+	f, err := openFileNoFollow(p, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -192,8 +191,8 @@ func (fs *localFS) Read(name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Open file without following symlinks (TOCTOU-safe)
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	// Open file without following symlinks (TOCTOU-safe on supported platforms)
+	f, err := openFileNoFollow(p, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -210,9 +209,8 @@ func (fs *localFS) Write(name string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	// Open file without following symlinks (TOCTOU-safe)
-	// O_RDWR for write, O_CREATE for new file, O_TRUNC to replace content
-	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
+	// Open file without following symlinks (TOCTOU-safe on supported platforms)
+	f, err := openFileNoFollow(p, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
@@ -227,10 +225,8 @@ func (fs *localFS) Delete(name string) error {
 	if err != nil {
 		return err
 	}
-	// Remove without following symlinks (TOCTOU-safe)
-	// os.Remove would follow symlinks, so use syscall.Unlinkat directly
-	// but that requires openat which is more complex; simpler: open with O_NOFOLLOW first
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	// Remove without following symlinks (TOCTOU-safe on supported platforms)
+	f, err := openFileNoFollow(p, os.O_RDONLY, 0)
 	if err != nil {
 		return err
 	}
