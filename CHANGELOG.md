@@ -24,10 +24,12 @@ All notable changes to this project will be documented in this file.
 - LocalFS Write/Delete through escaping symlinks are blocked
 - Component-level symlink check prevents directory traversal through internal symlinks
 - Path validation and O_NOFOLLOW only used on platforms that support them
+- Intermediate directory symlink TOCTOU vulnerability closed via root file descriptor openat/unlinkat traversal
 
 ### Changed
 
 - Filesystem interface: `Open(name string) (*File, error)` → `Open(name string) (io.ReadCloser, error)`
+- Minimum Go version requirement set to Go 1.23+ with atomic root-relative descriptor operations on Unix
 
 ### Removed
 

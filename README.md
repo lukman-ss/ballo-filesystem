@@ -33,15 +33,15 @@ url := fs.URL("data.txt")
 
 ## Limitations
 
+- Go 1.23+ required.
 - Local filesystem only. S3/cloud storage not implemented.
 - Path validation prevents traversal but does not enforce case-sensitivity on case-insensitive systems.
 - Open returns io.ReadCloser; for local filesystem, underlying type is *os.File (implements ReadCloser).
-- Symlink safety:
-  - Unix-like platforms (Linux, macOS, BSD, etc.): LocalFS uses `os.OpenFile` with `O_NOFOLLOW` to prevent TOCTOU symlink substitution attacks on final component files. The `resolveChecked` method validates paths and blocks directory symlinks followed by additional path components to prevent directory traversal through symlinks.
-  - Platforms without `O_NOFOLLOW` (Windows, JavaScript/WASM, AIX, Android): TOCTOU protection via `O_NOFOLLOW` is not available. Path validation and symlink resolution (`filepath.EvalSymlinks`) are still applied, but full TOCTOU protection cannot be guaranteed.
-  - Intermediate directory symlinks are always blocked regardless of platform.
-  - Final component symlinks pointing inside root are allowed and followed.
-  - Final component symlinks pointing outside root are blocked.
+- Symlink safety and TOCTOU protection:
+  - Unix-like platforms (Linux, macOS, BSD, etc.): LocalFS resolves all path components relative to the root directory file descriptor using atomic `openat`/`unlinkat` with `O_NOFOLLOW` and `O_DIRECTORY`. Intermediate directory components replaced by symlinks are blocked atomically at kernel level.
+  - Platforms without `openat`/`O_NOFOLLOW` support (Windows, JavaScript/WASM, AIX, Android): TOCTOU protection cannot be guaranteed. Path validation and `filepath.EvalSymlinks` are applied as best effort.
+  - Final component symlinks pointing inside root are safely followed.
+  - Final component symlinks escaping root are strictly blocked.
 
 ## Running tests
 

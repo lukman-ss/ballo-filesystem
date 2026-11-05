@@ -162,7 +162,7 @@ func TestLocalFS_ConcurrentDirectorySymlinkSubstitution(t *testing.T) {
 	if err := os.Mkdir(outside, 0o755); err != nil {
 		t.Fatalf("mkdir outside failed: %v", err)
 	}
-	outsideFile := filepath.Join(outside, "leak.txt")
+	outsideFile := filepath.Join(outside, "file.txt")
 	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
 		t.Fatalf("write outside failed: %v", err)
 	}
@@ -199,5 +199,116 @@ func TestLocalFS_ConcurrentDirectorySymlinkSubstitution(t *testing.T) {
 
 	if leaked > 0 {
 		t.Fatalf("directory symlink substitution leaked outside data: %d", leaked)
+	}
+}
+
+func TestLocalFS_ConcurrentDirectorySymlinkSubstitutionWrite(t *testing.T) {
+	if !platformSupportsO_NOFOLLOW() {
+		t.Skip("TOCTOU protection requires O_NOFOLLOW; not supported on this platform")
+	}
+	tmp := t.TempDir()
+	fs := NewLocal(tmp)
+
+	safeDir := filepath.Join(tmp, "safe")
+	if err := os.Mkdir(safeDir, 0o755); err != nil {
+		t.Fatalf("mkdir safe failed: %v", err)
+	}
+
+	outside := filepath.Join(os.TempDir(), "dir_escape_write")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatalf("mkdir outside failed: %v", err)
+	}
+	defer os.RemoveAll(outside)
+
+	dirLink := filepath.Join(tmp, "dir")
+	var wg sync.WaitGroup
+	var leaked int32
+
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			os.Remove(dirLink)
+			os.Symlink(outside, dirLink)
+		}()
+	}
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := fs.Write("dir/file.txt", []byte("safe"))
+			if err != nil {
+				return
+			}
+			data, err := os.ReadFile(filepath.Join(outside, "file.txt"))
+			if err == nil && string(data) == "safe" {
+				atomic.AddInt32(&leaked, 1)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if leaked > 0 {
+		t.Fatalf("directory symlink substitution leaked on write: %d", leaked)
+	}
+}
+
+func TestLocalFS_ConcurrentDirectorySymlinkSubstitutionDelete(t *testing.T) {
+	if !platformSupportsO_NOFOLLOW() {
+		t.Skip("TOCTOU protection requires O_NOFOLLOW; not supported on this platform")
+	}
+	tmp := t.TempDir()
+	fs := NewLocal(tmp)
+
+	safeDir := filepath.Join(tmp, "safe")
+	if err := os.Mkdir(safeDir, 0o755); err != nil {
+		t.Fatalf("mkdir safe failed: %v", err)
+	}
+	safeFile := filepath.Join(safeDir, "file.txt")
+	if err := os.WriteFile(safeFile, []byte("safe"), 0o644); err != nil {
+		t.Fatalf("write safe failed: %v", err)
+	}
+
+	outside := filepath.Join(os.TempDir(), "dir_escape_delete")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatalf("mkdir outside failed: %v", err)
+	}
+	outsideFile := filepath.Join(outside, "victim.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside failed: %v", err)
+	}
+	defer os.RemoveAll(outside)
+
+	dirLink := filepath.Join(tmp, "dir")
+	var wg sync.WaitGroup
+	var leaked int32
+
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			os.Remove(dirLink)
+			os.Symlink(outside, dirLink)
+		}()
+	}
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Try to delete through potentially swapped dir
+			_ = fs.Delete("dir/victim.txt")
+			if _, err := os.Stat(outsideFile); os.IsNotExist(err) {
+				atomic.AddInt32(&leaked, 1)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if leaked > 0 {
+		t.Fatalf("directory symlink substitution deleted outside file: %d", leaked)
 	}
 }
