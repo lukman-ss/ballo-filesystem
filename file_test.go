@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -610,4 +611,66 @@ func isPathTraversalError(err error) bool {
 		return pe.Err == ErrPathTraversal.Err
 	}
 	return false
+}
+
+// TestLocalFS_ConcurrentSymlinkSubstitution tests for TOCTOU vulnerability:
+// a malicious process could swap a file with a symlink to an escaping target
+// between validation and operation. With O_NOFOLLOW, the operation should
+// fail if the target becomes a symlink, preventing data leak.
+func TestLocalFS_ConcurrentSymlinkSubstitution(t *testing.T) {
+	if os.Getenv("RUN_CONCURRENT_TESTS") == "" {
+		t.Skip("Skipping concurrent test; set RUN_CONCURRENT_TESTS=1 to run")
+	}
+	tmp := t.TempDir()
+	fs := NewLocal(tmp)
+
+	// Create a valid file inside root
+	validPath := filepath.Join(tmp, "valid.txt")
+	if err := os.WriteFile(validPath, []byte("safe"), 0o644); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// Create escaping target outside root
+	outside := filepath.Join(os.TempDir(), "leak.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("setup outside failed: %v", err)
+	}
+	defer os.Remove(outside)
+
+	var wg sync.WaitGroup
+	var leaked int32
+	var blocked int32
+
+	// Readers: attempt to read the file concurrently
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			data, err := fs.Read("valid.txt")
+			if err != nil {
+				atomic.AddInt32(&blocked, 1)
+				return
+			}
+			if string(data) != "safe" {
+				atomic.AddInt32(&leaked, 1)
+			}
+		}()
+	}
+
+	// Swappers: concurrently swap file with symlink to escaping target
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			os.Remove(validPath)
+			os.Symlink(outside, validPath)
+		}()
+	}
+
+	wg.Wait()
+
+	if leaked > 0 {
+		t.Fatalf("data leaked: %d", leaked)
+	}
+	t.Logf("blocked: %d, leaked: %d", blocked, leaked)
 }
