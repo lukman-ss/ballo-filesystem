@@ -34,8 +34,8 @@ url := fs.URL("data.txt")
 ## Limitations
 
 - Local filesystem only. S3/cloud storage not implemented.
-- `MemoryFS.Open()` returns error: no real `*os.File`. Use `Read`/`Write` instead.
 - Path validation prevents traversal but does not enforce case-sensitivity on case-insensitive systems.
+- Open returns io.ReadCloser; for local filesystem, underlying type is *os.File (implements ReadCloser).
 
 ## Running tests
 

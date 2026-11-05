@@ -6,21 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- `Filesystem` interface: `Open`, `Read`, `Write`, `Delete`, `Exists`, `URL`
-- `NewLocal` implementation with path-traversal validation scoped to root disk
-- `NewMemory` in-memory implementation for tests
-- `PathError` typed errors: `ErrEmptyPath`, `ErrAbsolutePath`, `ErrPathTraversal`, `ErrNotFound`, `ErrPermission`, `ErrInvalidName`
-- Path validation rejects empty, absolute, and parent-traversal paths
-- Automatic parent directory creation on `Write`
+- `Open` now returns `io.ReadCloser` instead of concrete `*File`
+- MemoryFS uses mutex for thread-safe concurrent operations
+- MemoryFS returns data copies to prevent slice aliasing
+- LocalFS prevents escape through symlinks via `filepath.EvalSymlinks`
+- Comprehensive tests for symlink escape, concurrent access, slice copying, Open behavior
 
 ### Fixed
 
-- None
+- MemoryFS.Open now returns valid `io.ReadCloser` for existing files
+- MemoryFS Read/Write clone data to protect internal map from mutation
+- LocalFS validates final resolved path after symlink evaluation
+- LocalFS Write/Delete/Delete through escaping symlinks are blocked
 
 ### Changed
 
-- None
+- Filesystem interface: `Open(name string) (*File, error)` → `Open(name string) (io.ReadCloser, error)`
 
 ### Removed
 
-- None
+- LocalFS.File embedded type (no longer needed)
